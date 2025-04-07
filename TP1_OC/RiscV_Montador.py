@@ -1,3 +1,5 @@
+from multiprocessing import Value
+import operator
 import re
 import json
 import os
@@ -18,6 +20,49 @@ INSTRUCTIONS = {
 
 # Mapeamento de registradores RISC-V
 registers = {f'x{i}': i for i in range(32)}
+
+
+def parse_register(reg_string):
+    if not reg_string.startswith("x"):
+        raise ValueError(f"Registrador {reg_string} invalido, nao comeca com x")
+    try: 
+        reg_num = int(reg_string[1:])
+    except ValueError:
+        raise ValueError(f"Registrador invalido: {reg_string} numero nao aceito")
+    if not 0 <= reg_num <= 31:
+        raise ValueError(f"Registrador invalido (fora do intervalo x0 e x31)")
+    
+    reg_bin = format(reg_num,'05b')
+ 
+    return reg_bin
+
+def build_r_type(instruction,operands):
+    #Verificar se tem o numero certo de operandos (regs)
+    if len(operands) < 3:
+        raise ValueError(f"Instrucao {instruction} requer 3 operandos")
+    
+    #Extrair registradores
+    rd, rs1, rs2 = operands
+    rd_bin = parse_register(rd)
+    rs1_bin = parse_register(rs1)
+    rs2_bin = parse_register(rs2)
+
+    #Obter as informacoes dos campos de controle(funt e opcode)
+
+    instr_info = INSTRUCTIONS[instruction]
+    opcode = instr_info['opcode']
+    funct3 = instr_info['funct3']
+    funct7 = instr_info['funct7']
+
+    instruction_bin = (
+        (funct7 << 25) |
+        (int(rs2_bin, 2) << 20) |
+        (int(rs1_bin, 2) << 15) |
+        (funct3 << 12) |
+        (int(rd_bin, 2) << 7) |
+        opcode
+    )
+    return instruction_bin
 
 def riscv_assembler():
     line_components = []  # Armazenar por cada linha
@@ -94,6 +139,10 @@ def riscv_assembler():
     except Exception as e:
         print(f"Erro ao salvar o arquivo de saída: {e}")
         return None
+   
+    
+
+    
 
 if __name__ == "__main__":
     riscv_assembler()

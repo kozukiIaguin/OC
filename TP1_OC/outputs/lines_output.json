@@ -1,0 +1,65 @@
+{
+    "source_file": "entrada.asm",
+    "lines": [
+        {
+            "line_number": 1,
+            "original": "add x2, x0, x1",
+            "label": null,
+            "instruction": "add",
+            "operands": [
+                "x2",
+                "x0",
+                "x1"
+            ]
+        },
+        {
+            "line_number": 2,
+            "original": "sll x1, x2, x2",
+            "label": null,
+            "instruction": "sll",
+            "operands": [
+                "x1",
+                "x2",
+                "x2"
+            ]
+        },
+        {
+            "line_number": 3,
+            "original": "or x2, x2, x1",
+            "label": null,
+            "instruction": "or",
+            "operands": [
+                "x2",
+                "x2",
+                "x1"
+            ]
+        },
+        {
+            "line_number": 4,
+            "original": "andi x2, x1, 16",
+            "label": null,
+            "instruction": "andi",
+            "operands": [
+                "x2",
+                "x1",
+                "16"
+            ]
+        },
+        {
+            "line_number": 5,
+            "original": "addi x3, x2, -243",
+            "label": null,
+            "instruction": "addi",
+            "operands": [
+                "x3",
+                "x2",
+                "-243"
+            ]
+        }
+    ],
+    "statistics": {
+        "total_lines": 5,
+        "labels": 0,
+        "instructions": 5
+    }
+}

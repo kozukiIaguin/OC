@@ -3,8 +3,9 @@ import json
 import os
 
 OUTPUT_DIR = "outputs"
+ASSEMBLY_PATH = "entrada.asm"
 
-#Conjunto 12 de instruções
+# Conjunto de instruções RISC-V
 INSTRUCTIONS = {
     'lw':   {'opcode': 0b0000011, 'funct3': 0b010, 'type': 'I'},
     'sw':   {'opcode': 0b0100011, 'funct3': 0b010, 'type': 'S'},
@@ -15,167 +16,84 @@ INSTRUCTIONS = {
     'beq':  {'opcode': 0b1100011, 'funct3': 0b000, 'type': 'B'}
 }
 
-#Mapear os registradores do RiscV
+# Mapeamento de registradores RISC-V
 registers = {f'x{i}': i for i in range(32)}
-def riscv_assembler(assembly_code):
 
-    machine_code = []
-    labels = {}#Armazenar cada label da instrucao separado 
-    current_address = 0#Contador para o index de cada instrução
-
-    os.makedirs(OUTPUT_DIR,exist_ok=True)
-
-    #Pegar linha por linha do codigo e remover possiveis comentarios e vazios
-    lines = [line.split('#')[0].strip() for line in assembly_code.split()]
-    if lines:
+def riscv_assembler():
+    line_components = []  # Armazenar por cada linha
     
-        lines_path = os.path.join(OUTPUT_DIR,'lines.json')
-        with open(lines_path,'w',encoding='utf-8') as f:
-            json.dump(lines,f,ensure_ascii=False,indent=2)
-    else:
-        print("Nenhuma linha extraida")
-        exit        
-
-        #Encontrar e separar labels de cada instrucao, se tiver, ele armazena o endereço, se não avança 4 casas
-
-        for line in lines:
-            if ':' in line:
-                label = line.split(':')[0].strip()
-                labels[label] = current_address
-            else:
-                current_address +=4#4 bytes p a prox
-
-
-
-        #Segunda passagem pela linha para fazer a montagem final
-        current_address = 0
-        for line in lines:
-            if ':' in line:
-                continue #Labels que ja foram processados
-
-            #Dividir a instrucao em partes ['lw', 'x1', '4', 'x2']).
-            parts = re.split(r'[\s,()]+', line.strip().lower())
-            if parts:
-                parts = [p for p in parts]
-            else:
-                continue
-            instr_name = parts[0]
-
-            #Codificar em binario
-
-            try:
-                instruction = INSTRUCTIONS[instr_name]
-                binary = 0
-
-                #Formato R(sub,xor,srl)
-                if instruction['type'] == 'R':
-                    rd = registers[parts[1]]
-                    rs1 = registers[parts[2]]
-                    rs2 = registers[parts[3]]
+    try:
+        with open(ASSEMBLY_PATH, 'r') as assembly_file:
+            for line_number, line in enumerate(assembly_file, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Dicionário para armazenar os componentes desta linha
+                components = {
+                    'line_number': line_number,
+                    'original': line,
+                    'label': None,
+                    'instruction': None,
+                    'operands': [],
                     
-                    binary = (
-                        (instruction['funct7'] << 25) |
-                        (rs2 << 20) |
-                        (rs1 << 15) |
-                        (instruction['funct3'] << 12) |
-                        (rd << 7) |
-                        instruction['opcode']
-                )
+                }
                 
-                #Formato S(sw)
-                elif instruction['type'] == 'S':
-                    rs2 = registers[parts[1]]
-                    rs1 = registers[parts[3]]
-                    imm = int(parts[2])
-                    imm_11_5 = (imm >> 5) & 0x7F #bits 11-5
-                    imm_4_0 = imm & 0x1F # bits 4-0
-                    binary = (
-                        (imm_11_5 << 25) |
-                        (rs2 << 20) |
-                        (rs1 << 15) |
-                        (instruction['funct3'] << 12) |
-                        (imm_4_0 << 7) |
-                        instruction['opcode']
-                    )
+                # Separar comentário 
+                code_part = line.split('#')[0].strip()
+            
                 
-                #Formato L(lw,addi)
-                elif instruction['type'] == 'I':
-                    rd = registers[parts[1]]
-                    if instr_name == 'lw':
-                        rs1 = registers[parts[3]]
-                        imm = int(parts[2])
+                # Processar tokens da linha
+                tokens = [token.strip().rstrip(',') for token in code_part.split() if token.strip()]
+                
+                for i, token in enumerate(tokens):
+                    if token.endswith(':'):
+                        #  label
+                        components['label'] = token[:-1]
+                    elif i == 0 and components['label'] is None:
+                        # instrução primeiro token sem ser o label
+                        components['instruction'] = token
                     else:
-                        rs1 = registers[parts[2]]
-                        imm = int(parts[3])
-                    
-                    imm = imm & 0xFFF  # Garante 12 bits
-                    binary = (
-                        (imm << 20) |
-                        (rs1 << 15) |
-                        (instruction['funct3'] << 12) |
-                        (rd << 7) |
-                        instruction['opcode']
-                    )
+                        # É um operando
+                        components['operands'].append(token)
+                
+                line_components.append(components)
+    
+    except FileNotFoundError:
+        print(f'Erro: Arquivo {ASSEMBLY_PATH} não encontrado')
+        return None
+    except Exception as e:
+        print(f"Erro na leitura do arquivo: {e}")
+        return None
 
-                 #Formato B(beq)
-                elif instruction['type'] == 'B':
-                    rs1 = registers[parts[1]]
-                    rs2 = registers[parts[2]]
-                    label = parts[3]
-                    target_address = labels[label]
-                    offset = target_address - current_address
-                    
-                    imm_12 = (offset >> 12) & 0x1
-                    imm_10_5 = (offset >> 5) & 0x3F
-                    imm_4_1 = (offset >> 1) & 0xF
-                    imm_11 = (offset >> 11) & 0x1
-                    
-                    binary = (
-                        (imm_12 << 31) |
-                        (imm_10_5 << 25) |
-                        (rs2 << 20) |
-                        (rs1 << 15) |
-                        (instruction['funct3'] << 12) |
-                        (imm_4_1 << 8) |
-                        (imm_11 << 7) |
-                        instruction['opcode']
-                    )
-            
-                machine_code.append(binary)
-                current_address+=4
-            except KeyError as e:
-                print(f"Erro: instrucao ou registrador invalido - {line} ({str(e)})")
-            except IndexError:
-                print(f"Erro: Argumentos insuficientes - {line}")
-            except:
-                ValueError(f"Erro: valor invalido - {line}")
+    # Criar diretório de saída
+    try:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+    except OSError as e:
+        print(f"Erro ao criar diretório de saída: {e}")
+        return None
+    
+    # Salvar os dados organizados por linha
+    output_file = 'lines_output.json'
+    output_path = os.path.join(OUTPUT_DIR, output_file)
+    
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                'source_file': ASSEMBLY_PATH,
+                'lines': line_components,
+                'statistics': {
+                    'total_lines': len(line_components),
+                    'labels': sum(1 for line in line_components if line['label']),
+                    'instructions': len(set(line['instruction'] for line in line_components if line['instruction']))
+                }
+            }, f, ensure_ascii=False, indent=4)
+        
+        print(f"Arquivo processado com sucesso. Saída salva em: {output_path}")
+        return output_path
+    except Exception as e:
+        print(f"Erro ao salvar o arquivo de saída: {e}")
+        return None
 
-        return machine_code
-                    
-            
 if __name__ == "__main__":
-    assembly_program = """
-        init:
-            addi x1, x0, 10      # x1 = 10
-            addi x2, x0, 0       # x2 = 0
-        loop:
-            lw x3, 0(x1)         # carrega mem[x1] em x3
-            xor x4, x3, x2       # x4 = x3 XOR x2
-            srl x5, x4, x2       # x5 = x4 >> x2 (lógico)
-            sw x5, 4(x1)         # armazena x5 em mem[x1+4]
-            sub x1, x1, x2       # x1 = x1 - x2
-            beq x1, x0, end      # se x1 == 0, vai para end
-            jal x0, loop         # volta para loop
-        end:
-            nop
-        """
-
-    machine_code = riscv_assembler(assembly_program)
-    for i, code in enumerate(machine_code):
-        print(f"0x{i*4:04X}: 0x{code:08X}")
-
-
-
-
-
-
+    riscv_assembler()

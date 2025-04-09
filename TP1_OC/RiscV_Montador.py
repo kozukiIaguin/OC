@@ -9,12 +9,23 @@ ASSEMBLY_PATH = "entrada.asm"
 
 # Conjunto de instruções RISC-V
 INSTRUCTIONS = {
+    # Tipo I
     'lw':   {'opcode': 0b0000011, 'funct3': 0b010, 'type': 'I'},
-    'sw':   {'opcode': 0b0100011, 'funct3': 0b010, 'type': 'S'},
-    'sub':  {'opcode': 0b0110011, 'funct3': 0b000, 'funct7': 0b0100000, 'type': 'R'},
-    'xor':  {'opcode': 0b0110011, 'funct3': 0b100, 'funct7': 0b0000000, 'type': 'R'},
     'addi': {'opcode': 0b0010011, 'funct3': 0b000, 'type': 'I'},
+    'andi': {'opcode': 0b0010011, 'funct3': 0b111, 'type': 'I'},
+
+    # Tipo S
+    'sw':   {'opcode': 0b0100011, 'funct3': 0b010, 'type': 'S'},
+
+    # Tipo R
+    'sub':  {'opcode': 0b0110011, 'funct3': 0b000, 'funct7': 0b0100000, 'type': 'R'},
+    'add':  {'opcode': 0b0110011, 'funct3': 0b000, 'funct7': 0b0000000, 'type': 'R'},
+    'xor':  {'opcode': 0b0110011, 'funct3': 0b100, 'funct7': 0b0000000, 'type': 'R'},
     'srl':  {'opcode': 0b0110011, 'funct3': 0b101, 'funct7': 0b0000000, 'type': 'R'},
+    'sll':  {'opcode': 0b0110011, 'funct3': 0b001, 'funct7': 0b0000000, 'type': 'R'},
+    'or':   {'opcode': 0b0110011, 'funct3': 0b110, 'funct7': 0b0000000, 'type': 'R'},
+
+    # Tipo B
     'beq':  {'opcode': 0b1100011, 'funct3': 0b000, 'type': 'B'}
 }
 
@@ -24,138 +35,107 @@ registers = {f'x{i}': i for i in range(32)}
 
 def parse_register(reg_string):
     if not reg_string.startswith("x"):
-        raise ValueError(f"Registrador {reg_string} invalido, nao comeca com x")
+        raise ValueError(f"Registrador {reg_string} inválido, não começa com x")
     try:
         reg_num = int(reg_string[1:])
     except ValueError:
-        raise ValueError(f"Registrador invalido: {reg_string} numero nao aceito")
+        raise ValueError(f"Registrador inválido: {reg_string} número não aceito")
     if not 0 <= reg_num <= 31:
-        raise ValueError(f"Registrador invalido (fora do intervalo x0 e x31)")
+        raise ValueError(f"Registrador inválido (fora do intervalo x0 e x31)")
+    return format(reg_num, '05b')
 
-    reg_bin = format(reg_num,'05b')
 
-    return reg_bin
-
-def build_r_type(instruction,operands):
-    #Verificar se tem o numero certo de operandos (regs)
-    if len(operands) < 3:
-        raise ValueError(f"Instrucao {instruction} requer 3 operandos")
-
-    #Extrair registradores
+def build_r_type(instruction, operands):
+    if len(operands) != 3:
+        raise ValueError(f"Instrução {instruction} requer 3 operandos")
     rd, rs1, rs2 = operands
     rd_bin = parse_register(rd)
     rs1_bin = parse_register(rs1)
     rs2_bin = parse_register(rs2)
-
-    #Obter as informacoes dos campos de controle(funt e opcode)
-
     instr_info = INSTRUCTIONS[instruction]
-    opcode = instr_info['opcode']
-    funct3 = instr_info['funct3']
-    funct7 = instr_info['funct7']
-
-    instruction_bin = (
-            (funct7 << 25) |
-            (int(rs2_bin, 2) << 20) |
-            (int(rs1_bin, 2) << 15) |
-            (funct3 << 12) |
-            (int(rd_bin, 2) << 7) |
-            opcode
+    return (
+        (instr_info['funct7'] << 25) |
+        (int(rs2_bin, 2) << 20) |
+        (int(rs1_bin, 2) << 15) |
+        (instr_info['funct3'] << 12) |
+        (int(rd_bin, 2) << 7) |
+        instr_info['opcode']
     )
-    return instruction_bin
+
 
 def build_i_type(instruction, operands):
-    if len(operands) < 3:
+    if len(operands) != 3:
         raise ValueError(f"Instrução {instruction} requer 3 operandos")
-
     rd, rs1, imm = operands
     rd_bin = parse_register(rd)
     rs1_bin = parse_register(rs1)
-
-    imm_val = int(imm, 0)  # Aceita decimal ou hexadecimal (0x...)
-    imm_bin = format(imm_val & 0xFFF, '012b')  # 12 bits
-
+    imm_val = int(imm, 0)
+    imm_bin = format(imm_val & 0xFFF, '012b')
     instr_info = INSTRUCTIONS[instruction]
-    opcode = instr_info['opcode']
-    funct3 = instr_info['funct3']
-
-    instruction_bin = (
+    return (
         (int(imm_bin, 2) << 20) |
         (int(rs1_bin, 2) << 15) |
-        (funct3 << 12) |
+        (instr_info['funct3'] << 12) |
         (int(rd_bin, 2) << 7) |
-        opcode
+        instr_info['opcode']
     )
-    return instruction_bin
+
 
 def build_s_type(instruction, operands):
-    if len(operands) < 3:
-        raise ValueError(f"Instrução {instruction} requer 3 operandos")
-
-    rs2, offset_rs1 = operands[0], operands[1]
-    offset, rs1 = re.match(r'(-?\d+)\((x\d+)\)', offset_rs1).groups()
-
-    rs2_bin = parse_register(rs2)
+    if len(operands) != 2:
+        raise ValueError(f"Instrução {instruction} requer 2 operandos")
+    rs2, offset_rs1 = operands
+    match = re.match(r'(-?\d+)\((x\d+)\)', offset_rs1)
+    if not match:
+        raise ValueError(f"Formato inválido de offset(base): {offset_rs1}")
+    offset, rs1 = match.groups()
     rs1_bin = parse_register(rs1)
-
+    rs2_bin = parse_register(rs2)
     offset_val = int(offset, 0)
-    imm_bin = format(offset_val & 0xFFF, '012b')  # 12 bits
+    imm_bin = format(offset_val & 0xFFF, '012b')
     imm_11_5 = imm_bin[:7]
     imm_4_0 = imm_bin[7:]
-
     instr_info = INSTRUCTIONS[instruction]
-    opcode = instr_info['opcode']
-    funct3 = instr_info['funct3']
-
-    instruction_bin = (
+    return (
         (int(imm_11_5, 2) << 25) |
         (int(rs2_bin, 2) << 20) |
         (int(rs1_bin, 2) << 15) |
-        (funct3 << 12) |
+        (instr_info['funct3'] << 12) |
         (int(imm_4_0, 2) << 7) |
-        opcode
+        instr_info['opcode']
     )
-    return instruction_bin
 
 
 def build_b_type(instruction, operands):
-    if len(operands) < 3:
+    if len(operands) != 3:
         raise ValueError(f"Instrução {instruction} requer 3 operandos")
-
     rs1, rs2, imm = operands
     rs1_bin = parse_register(rs1)
     rs2_bin = parse_register(rs2)
-
     imm_val = int(imm, 0)
-    imm_bin = format(imm_val & 0x1FFF, '013b')  # 13 bits por causa do sinal
+    imm_bin = format(imm_val & 0x1FFF, '013b')
     imm_12 = imm_bin[0]
     imm_10_5 = imm_bin[1:7]
     imm_4_1 = imm_bin[7:11]
     imm_11 = imm_bin[11]
-
     instr_info = INSTRUCTIONS[instruction]
-    opcode = instr_info['opcode']
-    funct3 = instr_info['funct3']
-
-    instruction_bin = (
+    return (
         (int(imm_12, 2) << 31) |
         (int(imm_10_5, 2) << 25) |
         (int(rs2_bin, 2) << 20) |
         (int(rs1_bin, 2) << 15) |
-        (funct3 << 12) |
+        (instr_info['funct3'] << 12) |
         (int(imm_4_1, 2) << 8) |
         (int(imm_11, 2) << 7) |
-        opcode
+        instr_info['opcode']
     )
-    return instruction_bin
+
 
 def build_instruction(instruction, operands):
     instr_info = INSTRUCTIONS.get(instruction)
     if not instr_info:
         raise ValueError(f"Instrução {instruction} não suportada")
-
     instr_type = instr_info['type']
-
     if instr_type == 'R':
         return build_r_type(instruction, operands)
     elif instr_type == 'I':
@@ -169,54 +149,32 @@ def build_instruction(instruction, operands):
 
 
 def riscv_assembler_file():
-    line_components = []
-    binary_instruction = []
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
 
-    try:
-        with open(ASSEMBLY_PATH, 'r') as assembly_file:
-            for line_number, line in enumerate(assembly_file, 1):
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
+    output_path = os.path.join(OUTPUT_DIR, "output.txt")
+    with open(ASSEMBLY_PATH, 'r') as asm_file, open(output_path, 'w') as out_file:
+        for line_number, line in enumerate(asm_file, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):  # Ignora comentários
+                continue
+            parts = re.split(r'[,\s()]+', line)
+            instruction = parts[0]
+            operands = parts[1:]
+            try:
+                instruction_bin = build_instruction(instruction, operands)
+                out_file.write(f"{instruction_bin:032b}\n")
+            except Exception as e:
+                print(f"Erro na linha {line_number}: {line} -> {e}")
 
-                components = {
-                    'line_number': line_number,
-                    'original': line,
-                    'label': None,
-                    'instruction': None,
-                    'operands': [],
-                }
+    print(f"Assemble finalizado. Arquivo gerado em: {output_path}")
 
-                code_part = line.split('#')[0].strip()
-                tokens = [token.strip().rstrip(',') for token in code_part.split() if token.strip()]
-
-                for i, token in enumerate(tokens):
-                    if token.endswith(':'):
-                        components['label'] = token[:-1]
-                    elif i == 0 and components['label'] is None:
-                        components['instruction'] = token
-                    else:
-                        components['operands'].append(token)
-
-                    isnt_bin = build_instruction(components['instruction'],components['operands'])
-                    binary_instruction.append(isnt_bin)
-                line_components.append(components)
-    
-        save_results(binary_instruction)
-
-    except FileNotFoundError:
-        print(f'Erro: Arquivo {ASSEMBLY_PATH} não encontrado')
-        return None
-    except Exception as e:
-        print(f"Erro na leitura do arquivo: {e}")
-        return None
-    
-    # Salva o resultado se não caiu em exceção
-    return save_lines_json(line_components, ASSEMBLY_PATH)
 
 def riscv_assembler_interactive():
     """Nova função interativa (com mesma estrutura do original)"""
     line_components = []
+    binary_instructions = []  # Corrigido: acumula todas as instruções montadas
+
     print("\nModo interativo - Digite seu código assembly")
     print("(Linha vazia para terminar)\n")
 
@@ -228,7 +186,6 @@ def riscv_assembler_interactive():
         if line.startswith('#'):  # Ignora comentários
             continue
 
-        # Mesmo processamento do original
         components = {
             'line_number': line_number,
             'original': line,
@@ -236,7 +193,7 @@ def riscv_assembler_interactive():
             'instruction': None,
             'operands': [],
         }
-        binary_instruction = []
+
         code_part = line.split('#')[0].strip()
         tokens = [token.strip().rstrip(',') for token in code_part.split() if token.strip()]
 
@@ -247,27 +204,28 @@ def riscv_assembler_interactive():
                 components['instruction'] = token
             else:
                 components['operands'].append(token)
-            isnt_bin = build_instruction(components['instruction'],components['operands'])
-            binary_instruction.append(isnt_bin)
+
+        # Monta a instrução binária depois de identificar instrução e operandos
+        inst_bin = build_instruction(components['instruction'], components['operands'])
+
+        binary_instructions.append(inst_bin)  # Acumula saída final
         line_components.append(components)
         line_number += 1
-    
 
-    save_results(binary_instruction)
-
-        
-
-    return save_lines_json(line_components, "entrada_interativa") if line_components else None
+    save_results(binary_instructions)  # Salva todas as instruções no arquivo
 
 
 
-def save_results(instruction):
-    os.makedirs(OUTPUT_DIR,exist_ok=True)
-    output_path = os.path.join(OUTPUT_DIR,'result.txt')
 
-    with open(output_path,'w',encoding='utf-8') as f:
-        f.write(instruction)
-    print("Resultados salvos")
+def save_results(instructions):
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    output_path = os.path.join(OUTPUT_DIR, 'result.txt')
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(instructions))  # Junta tudo separando por quebra de linha
+
+    print(f"Resultados salvos em {output_path}")
+
 
 
 def save_lines_json(line_components, source):

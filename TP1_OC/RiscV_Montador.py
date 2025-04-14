@@ -9,24 +9,40 @@ ASSEMBLY_PATH = "entrada.asm"
 
 # Conjunto de instruções RISC-V
 INSTRUCTIONS = {
-    # Tipo I
+    # Loads (Tipo I)
+    'lb':   {'opcode': 0b0000011, 'funct3': 0b000, 'type': 'I'},
+    'lh':   {'opcode': 0b0000011, 'funct3': 0b001, 'type': 'I'},
     'lw':   {'opcode': 0b0000011, 'funct3': 0b010, 'type': 'I'},
-    'addi': {'opcode': 0b0010011, 'funct3': 0b000, 'type': 'I'},
-    'andi': {'opcode': 0b0010011, 'funct3': 0b111, 'type': 'I'},
 
-    # Tipo S
+    # Stores (Tipo S)
+    'sb':   {'opcode': 0b0100011, 'funct3': 0b000, 'type': 'S'},
+    'sh':   {'opcode': 0b0100011, 'funct3': 0b001, 'type': 'S'},
     'sw':   {'opcode': 0b0100011, 'funct3': 0b010, 'type': 'S'},
 
-    # Tipo R
-    'sub':  {'opcode': 0b0110011, 'funct3': 0b000, 'funct7': 0b0100000, 'type': 'R'},
+    # Operações aritméticas/lógicas (Tipo R)
     'add':  {'opcode': 0b0110011, 'funct3': 0b000, 'funct7': 0b0000000, 'type': 'R'},
-    'xor':  {'opcode': 0b0110011, 'funct3': 0b100, 'funct7': 0b0000000, 'type': 'R'},
-    'srl':  {'opcode': 0b0110011, 'funct3': 0b101, 'funct7': 0b0000000, 'type': 'R'},
-    'sll':  {'opcode': 0b0110011, 'funct3': 0b001, 'funct7': 0b0000000, 'type': 'R'},
+    'sub':  {'opcode': 0b0110011, 'funct3': 0b000, 'funct7': 0b0100000, 'type': 'R'},
+    'and':  {'opcode': 0b0110011, 'funct3': 0b111, 'funct7': 0b0000000, 'type': 'R'},
     'or':   {'opcode': 0b0110011, 'funct3': 0b110, 'funct7': 0b0000000, 'type': 'R'},
+    'xor':  {'opcode': 0b0110011, 'funct3': 0b100, 'funct7': 0b0000000, 'type': 'R'},
+    'sll':  {'opcode': 0b0110011, 'funct3': 0b001, 'funct7': 0b0000000, 'type': 'R'},
+    'srl':  {'opcode': 0b0110011, 'funct3': 0b101, 'funct7': 0b0000000, 'type': 'R'},
 
-    # Tipo B
-    'beq':  {'opcode': 0b1100011, 'funct3': 0b000, 'type': 'B'}
+    # Operações imediatas (Tipo I)
+    'addi': {'opcode': 0b0010011, 'funct3': 0b000, 'type': 'I'},
+    'andi': {'opcode': 0b0010011, 'funct3': 0b111, 'type': 'I'},
+    'ori':  {'opcode': 0b0010011, 'funct3': 0b110, 'type': 'I'},
+    'xori': {'opcode': 0b0010011, 'funct3': 0b100, 'type': 'I'},
+
+
+    # Branches (Tipo B)
+    'beq':  {'opcode': 0b1100011, 'funct3': 0b000, 'type': 'B'},
+    'bne':  {'opcode': 0b1100011, 'funct3': 0b001, 'type': 'B'},
+    # Pseudo-instruções
+    'mv':  {'pseudo': True, 'base': 'addi', 'map': lambda rd, rs: [rd, rs, '0']},
+    'nop': {'pseudo': True, 'base': 'addi', 'map': lambda: ['x0', 'x0', '0']},
+    'not': {'pseudo': True, 'base': 'xori', 'map': lambda rd, rs: [rd, rs, '-1']},
+    'neg': {'pseudo': True, 'base': 'sub',  'map': lambda rd, rs: [rd, 'x0', rs]},
 }
 
 # Mapeamento de registradores RISC-V
@@ -135,6 +151,13 @@ def build_instruction(instruction, operands):
     instr_info = INSTRUCTIONS.get(instruction)
     if not instr_info:
         raise ValueError(f"Instrução {instruction} não suportada")
+
+    # Se for pseudo-instrução, redireciona
+    if instr_info.get('pseudo'):
+        base_instr = instr_info['base']
+        mapped_operands = instr_info['map'](*operands)
+        return build_instruction(base_instr, mapped_operands)
+
     instr_type = instr_info['type']
     if instr_type == 'R':
         return build_r_type(instruction, operands)
@@ -147,22 +170,51 @@ def build_instruction(instruction, operands):
     else:
         raise ValueError(f"Tipo {instr_type} não implementado ainda")
 
-
 def riscv_assembler_file():
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
 
     output_path = os.path.join(OUTPUT_DIR, "output.txt")
+    i_type_instructions = {'lw', 'lh', 'lb', 'lhu', 'lbu'}  # Lista de instruções tipo I
+
     with open(ASSEMBLY_PATH, 'r') as asm_file, open(output_path, 'w') as out_file:
         for line_number, line in enumerate(asm_file, 1):
             line = line.strip()
             if not line or line.startswith("#"):  # Ignora comentários
                 continue
-            parts = re.split(r'[,\s()]+', line)
-            instruction = parts[0]
-            operands = parts[1:]
+
+            components = {
+                'line_number': line_number,
+                'original': line,
+                'label': None,
+                'instruction': None,
+                'operands': [],
+            }
+
+            code_part = line.split('#')[0].strip()
+            tokens = [token.strip().rstrip(',') for token in code_part.split() if token.strip()]
+
+            for i, token in enumerate(tokens):
+                if token.endswith(':'):
+                    components['label'] = token[:-1]
+                elif components['instruction'] is None:
+                    components['instruction'] = token
+                else:
+                    instr = components['instruction']
+                    if instr in i_type_instructions:
+                        match = re.match(r'^(-?\d+)\((x\d+)\)$', token)
+                        if match:
+                            imm, reg = match.groups()
+                            components['operands'].append(reg)
+                            components['operands'].append(imm)
+                        else:
+                            components['operands'].append(token)
+                    else:
+                        components['operands'].append(token)
+
             try:
-                instruction_bin = build_instruction(instruction, operands)
+                # Monta a instrução binária depois de identificar instrução e operandos
+                instruction_bin = build_instruction(components['instruction'], components['operands'])
                 out_file.write(f"{instruction_bin:032b}\n")
             except Exception as e:
                 print(f"Erro na linha {line_number}: {line} -> {e}")
@@ -177,6 +229,8 @@ def riscv_assembler_interactive():
 
     print("\nModo interativo - Digite seu código assembly")
     print("(Linha vazia para terminar)\n")
+
+    i_type_instructions = {'lw', 'lh', 'lb', 'lhu', 'lbu'}  # Lista de instruções tipo I
 
     line_number = 1
     while True:
@@ -200,10 +254,20 @@ def riscv_assembler_interactive():
         for i, token in enumerate(tokens):
             if token.endswith(':'):
                 components['label'] = token[:-1]
-            elif i == 0 and components['label'] is None:
+            elif components['instruction'] is None:
                 components['instruction'] = token
             else:
-                components['operands'].append(token)
+                instr = components['instruction']
+                if instr in i_type_instructions:
+                    match = re.match(r'^(-?\d+)\((x\d+)\)$', token)
+                    if match:
+                        imm, reg = match.groups()
+                        components['operands'].append(reg)
+                        components['operands'].append(imm)
+                    else:
+                        components['operands'].append(token)
+                else:
+                    components['operands'].append(token)
 
         # Monta a instrução binária depois de identificar instrução e operandos
         inst_bin = build_instruction(components['instruction'], components['operands'])
@@ -214,15 +278,17 @@ def riscv_assembler_interactive():
 
     save_results(binary_instructions)  # Salva todas as instruções no arquivo
 
-
-
-
 def save_results(instructions):
+    # Certificando-se de que o diretório de saída existe
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    output_path = os.path.join(OUTPUT_DIR, 'result.txt')
 
+    # Definindo o caminho do arquivo de saída
+    output_path = os.path.join(OUTPUT_DIR, 'output.txt')
+
+    # Abrindo o arquivo para escrita
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(instructions))  # Junta tudo separando por quebra de linha
+        # Converte cada instrução para uma string binária de 32 bits e junta com uma quebra de linha
+        f.write('\n'.join(f"{inst:032b}" for inst in instructions))  # Cada instrução é formatada como string binária de 32 bits
 
     print(f"Resultados salvos em {output_path}")
 
@@ -254,7 +320,7 @@ def save_lines_json(line_components, source):
         return None
 
 def main_menu():
-    """Menu principal (igual ao seu original)"""
+
     global ASSEMBLY_PATH
     while True:
         print("\n" + "="*40)
